@@ -1,0 +1,61 @@
+import Foundation
+@main struct CoreTests {
+    static func main() {
+        var s=WindowSelection()
+        s.begin(ids:[10,20,30],reverse:false)
+        check(s.selected == 20,"first Alt+Tab selects previous window")
+        s.step(1);check(s.selected == 30,"forward step")
+        s.step(1);check(s.selected == 10,"forward wraps")
+        s.step(-1);check(s.selected == 30,"backward wraps")
+        s.begin(ids:[10,20,30],reverse:true);check(s.selected == 30,"reverse starts at last")
+        s.begin(ids:[],reverse:false);s.step(-1);check(s.selected == nil,"empty list safe")
+        s.begin(ids:[7],reverse:false);s.step(1);check(s.selected == 7,"one window safe")
+        s.begin(ids:[1,2,3],reverse:false);s.select(3);check(s.selected == 3,"click selects window ID")
+        s.select(99);check(s.selected == 3,"missing window ID ignored")
+        check(orderedWindows(available:[4,2,5],recent:[9,2,4]) == [2,4,5],"closed windows dropped and new windows retained")
+        check(orderedWindows(available:[2,2,3],recent:[2,2]) == [2,3],"no duplicate window cards")
+        check(shouldCommitOnModifierChange(active:true,keyCode:58,optionHeld:false),"Alt release commits using event flags")
+        check(!shouldCommitOnModifierChange(active:true,keyCode:58,optionHeld:true),"Alt down does not commit")
+        check(!shouldCommitOnModifierChange(active:true,keyCode:56,optionHeld:false),"Shift release does not commit")
+        check(!shouldCommitOnModifierChange(active:false,keyCode:58,optionHeld:false),"inactive release ignored")
+        check(!windowActivationSucceeded(raised:true,targetPID:10,frontPID:20,focused:false),"raising a background window is not successful switching")
+        check(!windowActivationSucceeded(raised:true,targetPID:10,frontPID:10,focused:false),"same app with wrong focused window is not success")
+        check(windowActivationSucceeded(raised:true,targetPID:10,frontPID:10,focused:true),"frontmost app and selected focused window confirm switching")
+        check(thumbnailCaptureOrder(ids:[1,2,3,2],selected:3) == [3,1,2],"selected thumbnail first, without duplicate captures")
+        check(thumbnailCaptureOrder(ids:[1,2],selected:99) == [1,2],"do not capture selected window outside visible page")
+        var cache=ThumbnailFreshness()
+        check(cache.needsCapture(1,now:10),"uncached thumbnail must load")
+        cache.record(1,now:10)
+        check(!cache.needsCapture(1,now:11),"rapid reopen reuses recent thumbnail")
+        check(cache.needsCapture(1,now:13),"stale thumbnail refreshes")
+        cache.retain(ids:[2])
+        check(cache.needsCapture(1,now:11),"closed window cache is discarded")
+        s.begin(ids:Array(1...10),reverse:false)
+        s.moveRow(1,columns:3);check(s.selected == 5,"down keeps column in grid")
+        s.moveRow(-1,columns:3);check(s.selected == 2,"up returns to previous row")
+        s.moveRow(-1,columns:3);check(s.selected == 2,"up at first row stays put")
+        s.select(8);s.moveRow(1,columns:3);check(s.selected == 10,"partial final row uses nearest card")
+        s.moveRow(1,columns:3);check(s.selected == 10,"down at final row stays put")
+        s.begin(ids:[],reverse:false);s.moveRow(1,columns:3);check(s.selected == nil,"empty vertical movement safe")
+        var hot=HotKeyState()
+        check(hot.tab(optionHeld:true) == nil,"right Alt alone ignored")
+        hot.modifier(keyCode:58,optionHeld:true)
+        let first=hot.tab(optionHeld:true)!
+        check(hot.modifier(keyCode:58,optionHeld:false) == first,"release commits first session")
+        hot.modifier(keyCode:58,optionHeld:true)
+        let second=hot.tab(optionHeld:true)!
+        hot.cancel(session:first)
+        check(second != first && hot.session == second,"old dismissal cannot cancel next background session")
+        check(hot.modifier(keyCode:58,optionHeld:false) == second,"second session also commits")
+        for _ in 0..<100 {
+            hot.modifier(keyCode:58,optionHeld:true)
+            let id=hot.tab(optionHeld:true)!
+            check(hot.tab(optionHeld:true) == id,"held Alt keeps selection session")
+            check(hot.modifier(keyCode:58,optionHeld:false) == id,"repeated release completes session")
+        }
+        print("PASS: selection, focus verification, thumbnail scheduling/cache and 100 repeated hotkey sessions")
+    }
+    static func check(_ condition:Bool,_ label:String) {
+        if !condition { fputs("FAIL: \(label)\n",stderr);exit(1) }
+    }
+}

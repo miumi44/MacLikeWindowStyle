@@ -1,0 +1,20 @@
+{
+  "schemes": [
+    {
+      "if": {
+        "device": {
+          "category": "mouse"
+        }
+      },
+      "scrolling": {
+        "reverse": false,
+        "distance": {
+          "vertical": 3
+        },
+        "smoothed": {
+          "enabled": false
+        }
+      }
+    }
+  ]
+}

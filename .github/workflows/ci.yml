@@ -1,0 +1,16 @@
+name: macOS build and tests
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test-and-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run regression tests
+        run: ./scripts/test-windowbridge.sh
+      - name: Build and verify app
+        run: ./scripts/build-windowbridge.sh
