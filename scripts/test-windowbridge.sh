@@ -11,3 +11,13 @@ swiftc "$package_dir/Sources/WindowBridgeCore/InputConfiguration.swift" "$packag
 "$package_dir/.build/input-tests" "$package_dir/Fixtures/karabiner-example.json"
 swiftc "$package_dir/Sources/WindowBridgeCore/InputConfiguration.swift" "$package_dir/Sources/WindowBridgeCore/InputSettingsRepository.swift" "$package_dir/Tests/WindowBridgeCoreTests/RepositoryTests.swift" -o "$package_dir/.build/repository-tests"
 "$package_dir/.build/repository-tests" "$package_dir/Fixtures/karabiner-example.json"
+swiftc "$package_dir/Sources/WindowBridgeCore/Selection.swift" "$package_dir/Sources/WindowBridgeCore/WindowGeometry.swift" "$package_dir/Tests/WindowBridgeCoreTests/WindowGeometryTests.swift" -o "$package_dir/.build/window-geometry-tests"
+"$package_dir/.build/window-geometry-tests"
+swiftc "$package_dir/Sources/WindowBridgeCore/Selection.swift" "$package_dir/Sources/WindowBridgeCore/WindowGeometry.swift" "$package_dir/Sources/WindowBridgeCore/WindowShortcut.swift" "$package_dir/Tests/WindowBridgeCoreTests/WindowShortcutTests.swift" -o "$package_dir/.build/window-shortcut-tests"
+"$package_dir/.build/window-shortcut-tests"
+# Synthetic event objects are inspected directly; this test never posts input or installs a tap.
+hotkey_test_dir="$package_dir/.build/hotkey-tests"
+mkdir -p "$hotkey_test_dir"
+swiftc -emit-library -emit-module -module-name WindowBridgeCore "$package_dir/Sources/WindowBridgeCore/Selection.swift" "$package_dir/Sources/WindowBridgeCore/WindowGeometry.swift" "$package_dir/Sources/WindowBridgeCore/WindowShortcut.swift" -emit-module-path "$hotkey_test_dir/WindowBridgeCore.swiftmodule" -o "$hotkey_test_dir/libWindowBridgeCore.dylib"
+swiftc -I "$hotkey_test_dir" -L "$hotkey_test_dir" -lWindowBridgeCore "$package_dir/Sources/WindowBridge/HotKey.swift" "$package_dir/Tests/WindowBridgeCoreTests/HotKeyTests.swift" -o "$hotkey_test_dir/hotkey-tests"
+DYLD_LIBRARY_PATH="$hotkey_test_dir" "$hotkey_test_dir/hotkey-tests"

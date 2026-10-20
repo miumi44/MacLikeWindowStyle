@@ -1,6 +1,15 @@
 import Foundation
 @main struct InputSettingsTests {
     static func main() throws {
+        assert(rejects({ _ = try KeyboardConfiguration(data:Data("{".utf8)) }),"malformed Karabiner JSON accepted")
+        assert(rejects({ _ = try KeyboardConfiguration(data:Data(#"{"profiles":[{"selected":false}]}"#.utf8)) }),"Karabiner without a selected profile accepted")
+        assert(rejects({ _ = try MouseConfiguration(data:Data("{".utf8)) }),"malformed LinearMouse JSON accepted")
+        assert(rejects({ _ = try MouseConfiguration(data:Data(#"{"schemes":[{"if":{"device":{"category":"trackpad"}}}]}"#.utf8)) }),"LinearMouse without a generic mouse scheme accepted")
+        var unsupported=try KeyboardConfiguration(data:Data(#"{"profiles":[{"selected":true,"name":"Unsupported"}]}"#.utf8))
+        assert(unsupported.state(.altF4) == .unavailable,"missing supported rule reported as disabled")
+        unsupported.set(.altF4,enabled:false)
+        assert(unsupported.state(.altF4) == .unavailable,"unsupported rule became available after an edit")
+
         let data=try Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1]))
         var config=try KeyboardConfiguration(data:data)
         let original=try config.serialized()
@@ -31,5 +40,9 @@ import Foundation
         let custom=try MouseConfiguration(data:m.serialized())
         assert(custom.distance == 30.5,"custom wheel distance truncated or clamped")
         print("PASS: independent keyboard controls, lossless disable/enable, mouse preservation and custom fractional distance")
+    }
+
+    static func rejects(_ work:() throws -> Void) -> Bool {
+        do { try work();return false } catch { return true }
     }
 }

@@ -9,12 +9,29 @@ final class HotKey {
     private var worker: Thread?
     private let lock=NSLock()
     private var state=HotKeyState()
-    private var tileKeys=TileKeyState()
+    private var tileKeys=WindowShortcutState()
     private var switchingEnabled=false
     private var tilingEnabled=false
-    var onTile: ((TileDirection)->Void)?
+    var onWindowActionStart: ((Int)->Void)?
+    var onWindowAction: ((Int,WindowAction)->Void)?
+    var onWindowActionCancel: (()->Void)?
+    func cancelWindowAction() {
+        lock.lock();tileKeys.cancel();lock.unlock()
+        onWindowActionCancel?()
+    }
+    private func dispatchReadyWindowAction() {
+        if let request=tileKeys.takeReady(),tilingEnabled {
+            DispatchQueue.main.async { self.onWindowAction?(request.session,request.action) }
+        }
+    }
     func configure(switching:Bool,tiling:Bool) {
         lock.lock();switchingEnabled=switching;tilingEnabled=tiling;if !tiling { tileKeys.cancel() };lock.unlock()
+    }
+    func stopIfUnused() {
+        lock.lock()
+        let idle = !switchingEnabled && !tilingEnabled && !tileKeys.hasHeldKeys
+        lock.unlock()
+        if idle { stop() }
     }
     var onTab: ((Int,Bool)->Void)?
     var onRelease: ((Int)->Void)?
@@ -44,31 +61,49 @@ final class HotKey {
         worker=thread;thread.start();ready.wait()
         return true
     }
-    private func receive(_ type:CGEventType,_ event:CGEvent) -> Unmanaged<CGEvent>? {
+    func receive(_ type:CGEventType,_ event:CGEvent) -> Unmanaged<CGEvent>? {
         lock.lock();defer { lock.unlock() }
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            let session=state.session;state.reset();tileKeys=TileKeyState()
+            let session=state.session;state.reset();tileKeys.cancel()
+            DispatchQueue.main.async { self.onWindowActionCancel?() }
             if let tap { CGEvent.tapEnable(tap:tap,enable:true) }
             if let session { DispatchQueue.main.async { self.onEscape?(session) } }
             return Unmanaged.passUnretained(event)
         }
         let code=event.getIntegerValueField(.keyboardEventKeycode)
-        if type == .keyUp, tileKeys.keyUp(code) { return nil }
-        if type == .flagsChanged {
-            if let direction=tileKeys.releaseModifiers(command:event.flags.contains(.maskCommand),option:event.flags.contains(.maskAlternate)),tilingEnabled {
-                DispatchQueue.main.async { self.onTile?(direction) }
+        if type == .keyUp, tileKeys.keyUp(code) {
+            dispatchReadyWindowAction()
+            if !switchingEnabled && !tilingEnabled && !tileKeys.hasHeldKeys {
+                DispatchQueue.main.async { self.stopIfUnused() }
             }
-            if let session=state.modifier(keyCode:code,optionHeld:event.flags.contains(.maskAlternate)) {
+            return nil
+        }
+        if type == .flagsChanged {
+            tileKeys.modifiers(command:event.flags.contains(.maskCommand),option:event.flags.contains(.maskAlternate))
+            dispatchReadyWindowAction()
+            if let session=state.modifier(keyCode:code,optionHeld:event.flags.contains(.maskAlternate) && event.flags.rawValue & 0x20 != 0) {
                 DispatchQueue.main.async { self.onRelease?(session) }
             }
         } else if type == .keyDown {
-            if tileKeys.contains(code) { return nil }
+            if tileKeys.contains(code) {
+                if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 { return nil }
+                // A fresh down means the old up was lost (for example across sleep).
+                _=tileKeys.keyUp(code);tileKeys.cancel()
+                DispatchQueue.main.async { self.onWindowActionCancel?();self.stopIfUnused() }
+            }
+            if code == 53 && tileKeys.active {
+                tileKeys.cancel()
+                DispatchQueue.main.async { self.onWindowActionCancel?() }
+                // Escape itself is not intercepted, preserving its normal down/up pair.
+            }
             if tilingEnabled,state.session == nil,
-               let direction=tileDirection(keyCode:code,command:event.flags.contains(.maskCommand),
-                   leftAlt:event.flags.contains(.maskAlternate) && event.flags.rawValue & 0x20 != 0,
+               let action=windowAction(keyCode:code,command:event.flags.contains(.maskCommand),
+                   leftOption:event.flags.contains(.maskAlternate) && event.flags.rawValue & 0x20 != 0,
                    control:event.flags.contains(.maskControl),shift:event.flags.contains(.maskShift)) {
                 if event.getIntegerValueField(.keyboardEventAutorepeat) == 0 {
-                    tileKeys.press(code,direction:direction)
+                    if let session=tileKeys.press(code,action:action) {
+                        DispatchQueue.main.async { self.onWindowActionStart?(session) }
+                    }
                 }
                 return nil
             }
@@ -87,7 +122,7 @@ final class HotKey {
         return Unmanaged.passUnretained(event)
     }
     func stop() {
-        lock.lock();state.reset();tileKeys=TileKeyState();let loop=eventLoop;eventLoop=nil;lock.unlock()
+        lock.lock();state.reset();tileKeys.cancel();let loop=eventLoop;eventLoop=nil;lock.unlock()
         if let tap { CGEvent.tapEnable(tap:tap,enable:false);CFMachPortInvalidate(tap) }
         if let loop { CFRunLoopStop(loop) }
         source=nil;tap=nil;worker=nil

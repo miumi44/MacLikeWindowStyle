@@ -15,6 +15,10 @@ import WindowBridgeCore
     var toggle: NSButton!
     var hoverToggle:NSButton!
     var tileToggle:NSButton!
+    var windowActionTarget:(session:Int,target:WindowTiler.Target)?
+    var menuWindowTarget:WindowTiler.Target?
+    var windowActionBusy=false
+    var windowActionTask:Task<Void,Never>?
     var timer: Timer?
     var thumbnailTask: Task<Void,Never>?
     var selection = WindowSelection()
@@ -42,11 +46,15 @@ import WindowBridgeCore
         hook.onTab = { [weak self] session,reverse in self?.hotTab(session,reverse) }
         hook.onRelease = { [weak self] session in guard self?.hotkeySession == session else{return};self?.releaseSelection() }
         hook.onEscape = { [weak self] session in guard self?.hotkeySession == session else{return};self?.dismiss() }
-        hook.onTile = { [weak self] direction in
-            guard let self,!self.presenting else { return }
-            let result=WindowTiler.tile(direction)
-            self.message.stringValue=result
-            self.status.button?.toolTip=result
+        hook.onWindowActionStart = { [weak self] session in
+            guard let self,!self.presenting,!self.windowActionBusy,self.tileToggle.state == .on else { return }
+            self.windowActionTarget=WindowTiler.captureTarget().map { (session,$0) }
+        }
+        hook.onWindowActionCancel = { [weak self] in self?.windowActionTarget=nil }
+        hook.onWindowAction = { [weak self] session,action in
+            guard let self,self.tileToggle.state == .on,let captured=self.windowActionTarget,captured.session == session else { return }
+            self.windowActionTarget=nil
+            self.performWindowAction(action,target:captured.target)
         }
         status=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
         status.button?.image=NSImage(systemSymbolName:"rectangle.3.group",accessibilityDescription:"WindowBridge")
@@ -54,6 +62,12 @@ import WindowBridgeCore
         let sm=NSMenu();sm.delegate=self
         sm.addItem(withTitle:"창 전환 사용",action:#selector(toggleFromMenu),keyEquivalent:"").target=self
         sm.addItem(withTitle:"창 미리보기",action:#selector(loadWindows),keyEquivalent:"").target=self
+        let layoutItem=NSMenuItem(title:"창 배치",action:nil,keyEquivalent:"")
+        let layoutMenu=NSMenu()
+        for (title,selector) in [("왼쪽 절반",#selector(tileLeft)),("오른쪽 절반",#selector(tileRight)),("위쪽 절반",#selector(tileUp)),("아래쪽 절반",#selector(tileDown)),("최대화 / 이전 크기",#selector(maximizeWindow)),("배치 전 크기로 복원",#selector(restoreWindow)),("현재 창 최소화",#selector(minimizeWindow))] {
+            layoutMenu.addItem(withTitle:title,action:selector,keyEquivalent:"").target=self
+        }
+        layoutItem.submenu=layoutMenu;sm.addItem(layoutItem)
         sm.addItem(.separator())
         sm.addItem(withTitle:"설정…",action:#selector(openSettings),keyEquivalent:",").target=self
         sm.addItem(.separator())
@@ -73,7 +87,7 @@ import WindowBridgeCore
     func makeWindowSwitcherSettings() {
         settings=NSWindow(contentRect:NSRect(x:0,y:0,width:590,height:430),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
         settings.title="WindowBridge 설정";settings.isReleasedWhenClosed=false;settings.center()
-        let stack=NSStackView();stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=16
+        let stack=NSStackView();stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=10
         stack.translatesAutoresizingMaskIntoConstraints=false;settings.contentView!.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:settings.contentView!.leadingAnchor,constant:28),stack.trailingAnchor.constraint(equalTo:settings.contentView!.trailingAnchor,constant:-28),stack.topAnchor.constraint(equalTo:settings.contentView!.topAnchor,constant:28)])
         let title=NSTextField(labelWithString:"창 전환");title.font = .systemFont(ofSize:20,weight:.semibold);stack.addArrangedSubview(title)
@@ -85,12 +99,14 @@ import WindowBridgeCore
         perms.addArrangedSubview(button("화면 기록 권한",#selector(screenPermission)))
         perms.addArrangedSubview(button("손쉬운 사용 권한",#selector(accessPermission)));stack.addArrangedSubview(perms)
         toggle=NSButton(checkboxWithTitle:"백그라운드에서 왼쪽 Alt+Tab 사용",target:self,action:#selector(toggleHotkey));stack.addArrangedSubview(toggle)
-        tileToggle=NSButton(checkboxWithTitle:"Command + 왼쪽 Alt + 화살표로 창 절반 배치",target:self,action:#selector(toggleTiling))
+        tileToggle=NSButton(checkboxWithTitle:"Command + 왼쪽 Alt 창 관리 단축키 (실험)",target:self,action:#selector(toggleTiling))
         stack.addArrangedSubview(tileToggle)
+        let layoutHelp=NSTextField(wrappingLabelWithString:"← → ↑ ↓: 절반 배치 · Return: 최대화/복원 · M: 최소화\n동작키와 Command·Alt를 모두 놓으면 실행됩니다. 메뉴의 ‘창 배치’로도 사용할 수 있습니다.")
+        layoutHelp.font = .systemFont(ofSize:11);layoutHelp.textColor = .secondaryLabelColor;stack.addArrangedSubview(layoutHelp)
         hoverToggle=NSButton(checkboxWithTitle:"마우스를 올린 카드 강조 효과",target:self,action:#selector(toggleHover))
         hoverToggle.state=grid.hoverEnabled ? .on:.off;stack.addArrangedSubview(hoverToggle)
         message=NSTextField(wrappingLabelWithString:"상단 메뉴 막대에서 창 전환을 켜고 끌 수 있습니다.\n실제 창 썸네일은 화면 기록, 창 전환은 손쉬운 사용 권한이 필요합니다.")
-        message.font = .systemFont(ofSize:12);message.textColor = .secondaryLabelColor;stack.addArrangedSubview(message)
+        message.maximumNumberOfLines=3;message.font = .systemFont(ofSize:12);message.textColor = .secondaryLabelColor;stack.addArrangedSubview(message)
         let note=NSTextField(wrappingLabelWithString:"키보드·마우스 탭의 변경은 적용 버튼으로 저장합니다.\n창 전환을 켤 때 BetterCmdTab이 실행 중이면 종료 여부를 확인합니다.")
         note.font = .systemFont(ofSize:11);note.textColor = .secondaryLabelColor;stack.addArrangedSubview(note)
     }
@@ -115,15 +131,38 @@ import WindowBridgeCore
             catch { message.stringValue="창 목록을 불러오지 못했습니다: \(error.localizedDescription)" }
         }
     }
+    func performWindowAction(_ action:WindowAction,target:WindowTiler.Target) {
+        guard !windowActionBusy,!presenting else { return }
+        windowActionBusy=true
+        windowActionTask=Task { @MainActor in
+            defer { windowActionBusy=false;windowActionTask=nil }
+            let result=await WindowTiler.perform(action:action,target:target)
+            message.stringValue=result.components(separatedBy:" · 전 ").first ?? result;message.toolTip=result;status.button?.toolTip=result
+        }
+    }
+    func menuWindowAction(_ action:WindowAction) {
+        guard let target=menuWindowTarget else {
+            message.stringValue="배치할 앱 창을 먼저 선택한 뒤 메뉴를 열어 주세요.";return
+        }
+        performWindowAction(action,target:target)
+    }
+    @objc func tileLeft() { menuWindowAction(.tile(.left)) }
+    @objc func tileRight() { menuWindowAction(.tile(.right)) }
+    @objc func tileUp() { menuWindowAction(.tile(.up)) }
+    @objc func tileDown() { menuWindowAction(.tile(.down)) }
+    @objc func maximizeWindow() { menuWindowAction(.toggleMaximize) }
+    @objc func restoreWindow() { menuWindowAction(.restore) }
+    @objc func minimizeWindow() { menuWindowAction(.minimize) }
     @objc func toggleTiling() {
+        hook.cancelWindowAction()
         if tileToggle.state == .on && !AXIsProcessTrusted() {
             tileToggle.state = .off;message.stringValue="창 배치에는 손쉬운 사용 권한이 필요합니다.";return
         }
         hook.configure(switching:toggle.state == .on,tiling:tileToggle.state == .on)
         if tileToggle.state == .on {
             if !hook.start() { tileToggle.state = .off;hook.configure(switching:toggle.state == .on,tiling:false) }
-        } else if toggle.state == .off { hook.stop() }
-        message.stringValue=tileToggle.state == .on ? "Command + 왼쪽 Alt + ← → ↑ ↓ · 현재 화면의 네 방향 절반 배치":"창 절반 배치를 껐습니다."
+        } else if toggle.state == .off { hook.stopIfUnused() }
+        message.stringValue=tileToggle.state == .on ? "창 관리 단축키 켜짐 · 모든 키를 놓으면 실행합니다.":"창 관리 단축키를 껐습니다. 메뉴에서 창 배치는 사용할 수 있습니다."
     }
     @objc func toggleHover() {
         grid.hoverEnabled=hoverToggle.state == .on
@@ -131,6 +170,7 @@ import WindowBridgeCore
         grid.clearHover()
     }
     func menuWillOpen(_ menu:NSMenu) {
+        menuWindowTarget=WindowTiler.captureTarget()
         menu.items.first(where:{$0.action == #selector(toggleFromMenu)})?.state=toggle.state
     }
     @objc func toggleFromMenu() {
@@ -138,7 +178,7 @@ import WindowBridgeCore
         toggleHotkey()
     }
     @objc func toggleHotkey() {
-        guard toggle.state == .on else { hook.configure(switching:false,tiling:tileToggle.state == .on);if tileToggle.state == .off { hook.stop() };timer?.invalidate();timer=nil;dismiss();message.stringValue="창 전환을 껐습니다. 상단 메뉴에서 다시 켤 수 있습니다.";return }
+        guard toggle.state == .on else { hook.configure(switching:false,tiling:tileToggle.state == .on);if tileToggle.state == .off { hook.stopIfUnused() };timer?.invalidate();timer=nil;dismiss();message.stringValue="창 전환을 껐습니다. 상단 메뉴에서 다시 켤 수 있습니다.";return }
         guard AXIsProcessTrusted(),CGPreflightScreenCaptureAccess() else {
             toggle.state = .off;message.stringValue="화면 기록과 손쉬운 사용 권한을 먼저 허용해 주세요.";return
         }
@@ -159,6 +199,7 @@ import WindowBridgeCore
         }
     }
     func hotTab(_ session:Int,_ reverse:Bool) {
+        hook.cancelWindowAction()
         if presenting && hotkeySession == session { step(reverse ? -1:1);return }
         hotkeySession=session
         isDemo=false;show(reverse:reverse)
@@ -217,8 +258,8 @@ import WindowBridgeCore
         }
     }
     func dismiss() { grid.clearHover();thumbnailTask?.cancel();presenting=false;showGeneration += 1;if let session=hotkeySession { hook.cancel(session:session) };hotkeySession=nil;panel.orderOut(nil);if isDemo { openSettings() } }
-    @objc func willSleep() { dismiss() }
-    func applicationWillTerminate(_ notification:Notification) {thumbnailTask?.cancel();hook.stop();timer?.invalidate()}
+    @objc func willSleep() { windowActionTask?.cancel();hook.cancelWindowAction();dismiss() }
+    func applicationWillTerminate(_ notification:Notification) {windowActionTask?.cancel();thumbnailTask?.cancel();hook.stop();timer?.invalidate()}
     func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows:Bool)->Bool { openSettings();return true }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool {false}
 }

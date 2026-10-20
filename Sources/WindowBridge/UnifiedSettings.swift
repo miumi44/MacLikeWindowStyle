@@ -20,7 +20,7 @@ import WindowBridgeCore
     private var baseline:[InputFeature:NSControl.StateValue]=[:]
     private var busy=false
     init(switcherView:NSView) {
-        window=NSWindow(contentRect:NSRect(x:0,y:0,width:720,height:630),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
+        window=NSWindow(contentRect:NSRect(x:0,y:0,width:720,height:700),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
         window.title="WindowBridge · Windows 스타일 설정";window.isReleasedWhenClosed=false;window.center()
         super.init()
         let root=NSStackView();root.orientation = .vertical;root.alignment = .leading;root.spacing=12
@@ -33,7 +33,7 @@ import WindowBridgeCore
             let item=NSTabViewItem(identifier:name);item.label=name;item.view=view;tabs.addTabViewItem(item)
         }
         root.addArrangedSubview(tabs);tabs.widthAnchor.constraint(equalTo:root.widthAnchor).isActive=true
-        tabs.heightAnchor.constraint(greaterThanOrEqualToConstant:390).isActive=true
+        tabs.heightAnchor.constraint(greaterThanOrEqualToConstant:450).isActive=true
         let actions=NSStackView();actions.spacing=10
         applyButton=button("변경 적용",#selector(apply));applyButton.bezelColor = .controlAccentColor
         actions.addArrangedSubview(applyButton);actions.addArrangedSubview(button("다시 읽기",#selector(reload)))

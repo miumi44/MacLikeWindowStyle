@@ -1,0 +1,46 @@
+import Foundation
+@main struct WindowShortcutTests {
+    static func main() {
+        func check(_ value:Bool,_ message:String) { if !value { fatalError(message) } }
+        var keys=WindowShortcutState()
+        check(windowAction(keyCode:123,command:true,leftOption:true,control:false,shift:false) == .tile(.left),"arrow binding")
+        check(windowAction(keyCode:36,command:true,leftOption:true,control:false,shift:false) == .toggleMaximize,"Return binding")
+        check(windowAction(keyCode:46,command:true,leftOption:true,control:false,shift:false) == .minimize,"M binding")
+        for code:Int64 in [0,57,61,102,104] {
+            check(windowAction(keyCode:code,command:true,leftOption:true,control:false,shift:false) == nil,"ordinary and input-source keys pass through")
+        }
+        check(windowAction(keyCode:123,command:true,leftOption:false,control:false,shift:false) == nil,"right Option alone ignored")
+        check(windowAction(keyCode:123,command:true,leftOption:true,control:true,shift:false) == nil,"extra Control ignored")
+        check(windowAction(keyCode:123,command:true,leftOption:true,control:false,shift:true) == nil,"extra Shift ignored")
+        let first=keys.press(123,action:.tile(.left))
+        check(first != nil,"first down begins target capture")
+        check(keys.press(123,action:.tile(.left)) == nil,"held key does not recapture")
+        keys.modifiers(command:false,option:false)
+        check(keys.takeReady() == nil,"arrow still held prevents action")
+        check(keys.keyUp(123),"matching up consumed")
+        check(keys.takeReady()?.action == .tile(.left),"commit after final key released")
+        check(keys.takeReady() == nil,"commit only once")
+        let second=keys.press(124,action:.tile(.right))
+        check(second != first,"new session distinct")
+        check(keys.keyUp(124),"release first")
+        keys.modifiers(command:true,option:false)
+        check(keys.takeReady() == nil,"wait for Command")
+        keys.modifiers(command:false,option:false)
+        check(keys.takeReady()?.action == .tile(.right),"modifier last commits")
+        _=keys.press(123,action:.tile(.left))
+        _=keys.press(126,action:.tile(.up))
+        keys.modifiers(command:false,option:false)
+        check(keys.keyUp(123),"first arrow up")
+        check(keys.takeReady() == nil,"second arrow still held")
+        check(keys.keyUp(126),"second arrow up")
+        check(keys.takeReady()?.action == .tile(.up),"last requested direction wins")
+        _=keys.press(46,action:.minimize);keys.cancel()
+        check(keys.hasHeldKeys,"tap must stay alive to drain consumed release")
+        check(keys.keyUp(46),"cancel preserves paired release")
+        check(!keys.hasHeldKeys,"tap may stop after drained release")
+        keys.modifiers(command:false,option:false)
+        check(keys.takeReady() == nil,"cancel never executes")
+        check(!keys.keyUp(0),"unrelated letter up passes through")
+        print("PASS: window shortcut bindings, all-key release, repeat, cancel, input-source key preservation")
+    }
+}
