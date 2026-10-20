@@ -1,6 +1,26 @@
 import Foundation
+import CoreGraphics
 @main struct CoreTests {
     static func main() {
+        let area=CGRect(x:-1200,y:40,width:1200,height:800)
+        check(tileFrame(.left,in:area) == CGRect(x:-1200,y:40,width:600,height:800),"left half on secondary screen")
+        check(tileFrame(.right,in:area) == CGRect(x:-600,y:40,width:600,height:800),"right half")
+        check(tileFrame(.up,in:area) == CGRect(x:-1200,y:40,width:1200,height:400),"upper half in AX coordinates")
+        check(tileFrame(.down,in:area) == CGRect(x:-1200,y:440,width:1200,height:400),"lower half")
+        check(tileDirection(keyCode:123,command:true,leftAlt:true,control:false,shift:false) == .left,"Command left Alt arrow tiles")
+        check(tileDirection(keyCode:123,command:true,leftAlt:false,control:false,shift:false) == nil,"Command arrow text navigation preserved")
+        check(tileDirection(keyCode:115,command:true,leftAlt:true,control:false,shift:false) == nil,"Home ignored")
+        check(tileDirection(keyCode:126,command:true,leftAlt:true,control:true,shift:false) == nil,"extra modifiers ignored")
+        var tileKeys=TileKeyState()
+        check(tileKeys.press(123,direction:.left) == true,"tile press captured")
+        check(tileKeys.releaseModifiers(command:true,option:false) == nil,"wait for Command release")
+        check(tileKeys.keyUp(123),"matching arrow release captured")
+        check(!tileKeys.keyUp(0),"ordinary typing release untouched")
+        check(tileKeys.releaseModifiers(command:false,option:false) == .left,"tile after both modifiers released")
+        check(tileKeys.releaseModifiers(command:false,option:false) == nil,"tile only once")
+        _=tileKeys.press(124,direction:.right);tileKeys.cancel()
+        check(tileKeys.releaseModifiers(command:false,option:false) == nil,"disable cancels pending tile")
+        check(tileKeys.keyUp(124),"disable still pairs consumed key release")
         var s=WindowSelection()
         s.begin(ids:[10,20,30],reverse:false)
         check(s.selected == 20,"first Alt+Tab selects previous window")

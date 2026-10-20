@@ -1,3 +1,4 @@
+import CoreGraphics
 public struct WindowSelection {
     public private(set) var ids: [UInt32] = []
     public private(set) var index = 0
@@ -69,4 +70,36 @@ public struct ThumbnailFreshness {
     }
     public mutating func record(_ id:UInt32,now:Double) { captured[id]=now }
     public mutating func retain(ids:Set<UInt32>) { captured=captured.filter { ids.contains($0.key) } }
+}
+
+public enum TileDirection { case left, right, up, down }
+public func tileDirection(keyCode:Int64,command:Bool,leftAlt:Bool,control:Bool,shift:Bool) -> TileDirection? {
+    guard command && leftAlt && !control && !shift else { return nil }
+    switch keyCode { case 123:return .left;case 124:return .right;case 125:return .down;case 126:return .up;default:return nil }
+}
+// Input and output use AX coordinates: origin at the top left of the primary display.
+public func tileFrame(_ direction:TileDirection,in area:CGRect) -> CGRect {
+    switch direction {
+    case .left:return CGRect(x:area.minX,y:area.minY,width:area.width/2,height:area.height)
+    case .right:return CGRect(x:area.midX,y:area.minY,width:area.width/2,height:area.height)
+    case .up:return CGRect(x:area.minX,y:area.minY,width:area.width,height:area.height/2)
+    case .down:return CGRect(x:area.minX,y:area.midY,width:area.width,height:area.height/2)
+    }
+}
+
+// Keep consumed arrow downs and ups paired; defer AX work until modifiers are up.
+public struct TileKeyState {
+    private var held=Set<Int64>()
+    private var pending:TileDirection?
+    public init() {}
+    @discardableResult public mutating func press(_ code:Int64,direction:TileDirection) -> Bool {
+        held.insert(code);pending=direction;return true
+    }
+    public func contains(_ code:Int64) -> Bool { held.contains(code) }
+    public mutating func keyUp(_ code:Int64) -> Bool { held.remove(code) != nil }
+    public mutating func releaseModifiers(command:Bool,option:Bool) -> TileDirection? {
+        guard !command && !option else { return nil }
+        defer { pending=nil };return pending
+    }
+    public mutating func cancel() { pending=nil }
 }

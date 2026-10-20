@@ -14,6 +14,7 @@ import WindowBridgeCore
     var message: NSTextField!
     var toggle: NSButton!
     var hoverToggle:NSButton!
+    var tileToggle:NSButton!
     var timer: Timer?
     var thumbnailTask: Task<Void,Never>?
     var selection = WindowSelection()
@@ -41,6 +42,12 @@ import WindowBridgeCore
         hook.onTab = { [weak self] session,reverse in self?.hotTab(session,reverse) }
         hook.onRelease = { [weak self] session in guard self?.hotkeySession == session else{return};self?.releaseSelection() }
         hook.onEscape = { [weak self] session in guard self?.hotkeySession == session else{return};self?.dismiss() }
+        hook.onTile = { [weak self] direction in
+            guard let self,!self.presenting else { return }
+            let result=WindowTiler.tile(direction)
+            self.message.stringValue=result
+            self.status.button?.toolTip=result
+        }
         status=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
         status.button?.image=NSImage(systemSymbolName:"rectangle.3.group",accessibilityDescription:"WindowBridge")
         status.button?.toolTip="WindowBridge · 창 전환"
@@ -78,6 +85,8 @@ import WindowBridgeCore
         perms.addArrangedSubview(button("화면 기록 권한",#selector(screenPermission)))
         perms.addArrangedSubview(button("손쉬운 사용 권한",#selector(accessPermission)));stack.addArrangedSubview(perms)
         toggle=NSButton(checkboxWithTitle:"백그라운드에서 왼쪽 Alt+Tab 사용",target:self,action:#selector(toggleHotkey));stack.addArrangedSubview(toggle)
+        tileToggle=NSButton(checkboxWithTitle:"Command + 왼쪽 Alt + 화살표로 창 절반 배치",target:self,action:#selector(toggleTiling))
+        stack.addArrangedSubview(tileToggle)
         hoverToggle=NSButton(checkboxWithTitle:"마우스를 올린 카드 강조 효과",target:self,action:#selector(toggleHover))
         hoverToggle.state=grid.hoverEnabled ? .on:.off;stack.addArrangedSubview(hoverToggle)
         message=NSTextField(wrappingLabelWithString:"상단 메뉴 막대에서 창 전환을 켜고 끌 수 있습니다.\n실제 창 썸네일은 화면 기록, 창 전환은 손쉬운 사용 권한이 필요합니다.")
@@ -106,6 +115,16 @@ import WindowBridgeCore
             catch { message.stringValue="창 목록을 불러오지 못했습니다: \(error.localizedDescription)" }
         }
     }
+    @objc func toggleTiling() {
+        if tileToggle.state == .on && !AXIsProcessTrusted() {
+            tileToggle.state = .off;message.stringValue="창 배치에는 손쉬운 사용 권한이 필요합니다.";return
+        }
+        hook.configure(switching:toggle.state == .on,tiling:tileToggle.state == .on)
+        if tileToggle.state == .on {
+            if !hook.start() { tileToggle.state = .off;hook.configure(switching:toggle.state == .on,tiling:false) }
+        } else if toggle.state == .off { hook.stop() }
+        message.stringValue=tileToggle.state == .on ? "Command + 왼쪽 Alt + ← → ↑ ↓ · 현재 화면의 네 방향 절반 배치":"창 절반 배치를 껐습니다."
+    }
     @objc func toggleHover() {
         grid.hoverEnabled=hoverToggle.state == .on
         UserDefaults.standard.set(grid.hoverEnabled,forKey:"hoverFeedbackEnabled")
@@ -119,7 +138,7 @@ import WindowBridgeCore
         toggleHotkey()
     }
     @objc func toggleHotkey() {
-        guard toggle.state == .on else { hook.stop();timer?.invalidate();timer=nil;dismiss();message.stringValue="창 전환을 껐습니다. 상단 메뉴에서 다시 켤 수 있습니다.";return }
+        guard toggle.state == .on else { hook.configure(switching:false,tiling:tileToggle.state == .on);if tileToggle.state == .off { hook.stop() };timer?.invalidate();timer=nil;dismiss();message.stringValue="창 전환을 껐습니다. 상단 메뉴에서 다시 켤 수 있습니다.";return }
         guard AXIsProcessTrusted(),CGPreflightScreenCaptureAccess() else {
             toggle.state = .off;message.stringValue="화면 기록과 손쉬운 사용 권한을 먼저 허용해 주세요.";return
         }
@@ -130,6 +149,7 @@ import WindowBridgeCore
             guard alert.runModal() == .alertFirstButtonReturn else { toggle.state = .off;return }
             competitors.forEach { _=$0.terminate() }
         }
+        hook.configure(switching:true,tiling:tileToggle.state == .on)
         guard hook.start() else {toggle.state = .off;message.stringValue="단축키를 등록하지 못했습니다. 손쉬운 사용 권한을 확인하고 앱을 다시 실행해 주세요.";return}
         isDemo=false;store.windows=[]
         message.stringValue="백그라운드 전환 켜짐 · 설정 창을 닫아도 작동합니다.\n왼쪽 Alt+Tab / Shift+Tab / Esc\n로그인 시 자동 실행은 아직 설정하지 않았습니다."
