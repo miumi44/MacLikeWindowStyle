@@ -8,7 +8,7 @@ swiftc "$package_dir/Sources/WindowBridgeCore/Selection.swift" "$package_dir/Tes
 swiftc "$package_dir/Sources/WindowBridge/SwitcherPanel.swift" "$package_dir/Tests/WindowBridgeCoreTests/PanelTests.swift" -o "$package_dir/.build/panel-tests"
 "$package_dir/.build/panel-tests"
 swiftc "$package_dir/Sources/WindowBridgeCore/InputConfiguration.swift" "$package_dir/Tests/WindowBridgeCoreTests/InputSettingsTests.swift" -o "$package_dir/.build/input-tests"
-"$package_dir/.build/input-tests" "$package_dir/Fixtures/karabiner-example.json"
+"$package_dir/.build/input-tests" "$package_dir/Fixtures/karabiner-example.json" "$package_dir/examples/karabiner-windows-rules.json"
 swiftc "$package_dir/Sources/WindowBridgeCore/InputConfiguration.swift" "$package_dir/Sources/WindowBridgeCore/InputSettingsRepository.swift" "$package_dir/Tests/WindowBridgeCoreTests/RepositoryTests.swift" -o "$package_dir/.build/repository-tests"
 "$package_dir/.build/repository-tests" "$package_dir/Fixtures/karabiner-example.json"
 swiftc "$package_dir/Sources/WindowBridgeCore/Selection.swift" "$package_dir/Sources/WindowBridgeCore/WindowGeometry.swift" "$package_dir/Tests/WindowBridgeCoreTests/WindowGeometryTests.swift" -o "$package_dir/.build/window-geometry-tests"

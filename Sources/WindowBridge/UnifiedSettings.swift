@@ -55,7 +55,7 @@ import WindowBridgeCore
             let b=NSButton(checkboxWithTitle:feature.title,target:nil,action:nil);b.allowsMixedState=true
             featureButtons[feature]=b;s.addArrangedSubview(b)
         }
-        s.addArrangedSubview(note("한영키는 기존 Caps Lock 입력 소스 전환을 사용합니다. Ctrl·탐색키의 개발 도구 예외와 장치 범위는 유지됩니다. Shift+Delete는 Finder 확인 창을 거칩니다."))
+        s.addArrangedSubview(note("한영키는 기존 Caps Lock 입력 소스 전환을 사용합니다. Ctrl+C/V/A를 켜면 왼쪽 Ctrl만 Command로 바뀌며, 오른쪽 Ctrl은 IDE 통합 터미널의 인터럽트용으로 유지됩니다. Shift+Delete는 Finder 확인 창을 거칩니다."))
         s.addArrangedSubview(button("Karabiner 고급 설정 열기",#selector(openKarabiner)))
         return s
     }
@@ -99,7 +99,7 @@ import WindowBridgeCore
             for feature in InputFeature.allCases {
                 let currentState=keyboard.state(feature);let value=state(currentState)
                 featureButtons[feature]?.state=value;featureButtons[feature]?.isEnabled=currentState != .unavailable
-                featureButtons[feature]?.toolTip=currentState == .unavailable ? "기존 관리 규칙을 찾지 못했습니다. 고급 설정에서 확인해 주세요.":nil
+                featureButtons[feature]?.toolTip = currentState == .unavailable ? "기존 관리 규칙을 찾지 못했습니다. 고급 설정에서 확인해 주세요." : feature == .ctrlEditing && currentState == .mixed ? "기존 Ctrl+C/V/A 규칙은 왼쪽·오른쪽 Ctrl을 구분하지 않고 일부 개발 도구에서 제외합니다. 켜고 적용하면 왼쪽 Ctrl만 모든 대상 앱에 적용합니다.":nil
                 baseline[feature]=value
             }
             reverse.state=current.mouse.reverse ? .on:.off;smooth.state=current.mouse.smooth ? .on:.off

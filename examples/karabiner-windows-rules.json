@@ -301,7 +301,7 @@
             "key_code": "a",
             "modifiers": {
               "mandatory": [
-                "control"
+                "left_control"
               ]
             }
           },
@@ -328,14 +328,9 @@
               "bundle_identifiers": [
                 "^com\\.apple\\.Terminal$",
                 "^com\\.googlecode\\.iterm2$",
-                "^com\\.microsoft\\.VSCode",
-                "^com\\.todesktop\\.230313mzl4w4u92$",
-                "^com\\.jetbrains\\.",
-                "^dev\\.zed\\.",
                 "^com\\.mitchellh\\.ghostty$",
                 "^net\\.kovidgoyal\\.kitty$",
                 "^org\\.alacritty",
-                "^com\\.openai\\.codex$",
                 "^com\\.parallels\\.",
                 "^com\\.vmware\\.",
                 "^com\\.microsoft\\.rdc"
@@ -399,7 +394,7 @@
             "key_code": "c",
             "modifiers": {
               "mandatory": [
-                "control"
+                "left_control"
               ]
             }
           },
@@ -426,14 +421,9 @@
               "bundle_identifiers": [
                 "^com\\.apple\\.Terminal$",
                 "^com\\.googlecode\\.iterm2$",
-                "^com\\.microsoft\\.VSCode",
-                "^com\\.todesktop\\.230313mzl4w4u92$",
-                "^com\\.jetbrains\\.",
-                "^dev\\.zed\\.",
                 "^com\\.mitchellh\\.ghostty$",
                 "^net\\.kovidgoyal\\.kitty$",
                 "^org\\.alacritty",
-                "^com\\.openai\\.codex$",
                 "^com\\.parallels\\.",
                 "^com\\.vmware\\.",
                 "^com\\.microsoft\\.rdc"
@@ -497,7 +487,7 @@
             "key_code": "v",
             "modifiers": {
               "mandatory": [
-                "control"
+                "left_control"
               ]
             }
           },
@@ -524,14 +514,9 @@
               "bundle_identifiers": [
                 "^com\\.apple\\.Terminal$",
                 "^com\\.googlecode\\.iterm2$",
-                "^com\\.microsoft\\.VSCode",
-                "^com\\.todesktop\\.230313mzl4w4u92$",
-                "^com\\.jetbrains\\.",
-                "^dev\\.zed\\.",
                 "^com\\.mitchellh\\.ghostty$",
                 "^net\\.kovidgoyal\\.kitty$",
                 "^org\\.alacritty",
-                "^com\\.openai\\.codex$",
                 "^com\\.parallels\\.",
                 "^com\\.vmware\\.",
                 "^com\\.microsoft\\.rdc"
