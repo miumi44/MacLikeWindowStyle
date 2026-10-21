@@ -1,6 +1,8 @@
 import AppKit
 import ApplicationServices
+import Carbon
 import ScreenCaptureKit
+import ServiceManagement
 import WindowBridgeCore
 
 @MainActor final class AppDelegate: NSObject,NSApplicationDelegate,NSWindowDelegate,NSMenuDelegate {
@@ -15,6 +17,8 @@ import WindowBridgeCore
     var toggle: NSButton!
     var hoverToggle:NSButton!
     var tileToggle:NSButton!
+    var loginToggle:NSButton!
+    var loginStatus:NSTextField!
     var windowActionTarget:(session:Int,target:WindowTiler.Target)?
     var menuWindowTarget:WindowTiler.Target?
     var windowActionBusy=false
@@ -23,12 +27,15 @@ import WindowBridgeCore
     var thumbnailTask: Task<Void,Never>?
     var selection = WindowSelection()
     var presenting = false
+    var switchingActive = false
+    var tilingActive = false
     var isDemo = false
     var refreshing = false
     var showGeneration = 0
     var hotkeySession: Int?
 
     func applicationDidFinishLaunching(_ notification:Notification) {
+        let loginLaunch=isLoginLaunch
         NSApp.setActivationPolicy(.accessory)
         let menu=NSMenu();let root=NSMenuItem();let sub=NSMenu()
         sub.addItem(withTitle:"WindowBridge 종료",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
@@ -47,12 +54,12 @@ import WindowBridgeCore
         hook.onRelease = { [weak self] session in guard self?.hotkeySession == session else{return};self?.releaseSelection() }
         hook.onEscape = { [weak self] session in guard self?.hotkeySession == session else{return};self?.dismiss() }
         hook.onWindowActionStart = { [weak self] session in
-            guard let self,!self.presenting,!self.windowActionBusy,self.tileToggle.state == .on else { return }
+            guard let self,!self.presenting,!self.windowActionBusy,self.tilingActive else { return }
             self.windowActionTarget=WindowTiler.captureTarget().map { (session,$0) }
         }
         hook.onWindowActionCancel = { [weak self] in self?.windowActionTarget=nil }
         hook.onWindowAction = { [weak self] session,action in
-            guard let self,self.tileToggle.state == .on,let captured=self.windowActionTarget,captured.session == session else { return }
+            guard let self,self.tilingActive,let captured=self.windowActionTarget,captured.session == session else { return }
             self.windowActionTarget=nil
             self.performWindowAction(action,target:captured.target)
         }
@@ -74,8 +81,15 @@ import WindowBridgeCore
         sm.addItem(withTitle:"WindowBridge 종료",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         status.menu=sm
         grid.hoverEnabled=UserDefaults.standard.object(forKey:"hoverFeedbackEnabled") as? Bool ?? true
-        makeSettings();openSettings()
+        makeSettings()
+        refreshLoginItemStatus()
+        restoreFeaturePreferences()
+        if !loginLaunch { openSettings() }
         NSWorkspace.shared.notificationCenter.addObserver(self,selector:#selector(willSleep),name:NSWorkspace.willSleepNotification,object:nil)
+    }
+    var isLoginLaunch:Bool {
+        guard let event=NSAppleEventManager.shared().currentAppleEvent,event.eventID == kAEOpenApplication else { return false }
+        return event.paramDescriptor(forKeyword:keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
     }
     func makeSettings() {
         makeWindowSwitcherSettings()
@@ -85,7 +99,7 @@ import WindowBridgeCore
         unifiedSettings=controller;settings=controller.window
     }
     func makeWindowSwitcherSettings() {
-        settings=NSWindow(contentRect:NSRect(x:0,y:0,width:590,height:430),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
+        settings=NSWindow(contentRect:NSRect(x:0,y:0,width:590,height:520),styleMask:[.titled,.closable,.miniaturizable],backing:.buffered,defer:false)
         settings.title="WindowBridge 설정";settings.isReleasedWhenClosed=false;settings.center()
         let stack=NSStackView();stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=10
         stack.translatesAutoresizingMaskIntoConstraints=false;settings.contentView!.addSubview(stack)
@@ -95,11 +109,18 @@ import WindowBridgeCore
         desc.font = .systemFont(ofSize:13);desc.textColor = .secondaryLabelColor;stack.addArrangedSubview(desc)
         let actions=NSStackView();actions.spacing=10
         actions.addArrangedSubview(button("열린 창 미리보기",#selector(loadWindows)));stack.addArrangedSubview(actions)
+        let loginRow=NSStackView();loginRow.spacing=10
+        loginToggle=NSButton(checkboxWithTitle:"로그인 시 자동 실행",target:self,action:#selector(toggleLoginItem));loginToggle.allowsMixedState=true;loginRow.addArrangedSubview(loginToggle)
+        loginStatus=NSTextField(wrappingLabelWithString:"");loginStatus.font = .systemFont(ofSize:11);loginStatus.textColor = .secondaryLabelColor;loginStatus.maximumNumberOfLines=2;loginRow.addArrangedSubview(loginStatus)
+        loginRow.addArrangedSubview(button("로그인 항목 설정 열기",#selector(openLoginItems)));stack.addArrangedSubview(loginRow)
+        loginRow.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true
         let perms=NSStackView();perms.spacing=10
         perms.addArrangedSubview(button("화면 기록 권한",#selector(screenPermission)))
         perms.addArrangedSubview(button("손쉬운 사용 권한",#selector(accessPermission)));stack.addArrangedSubview(perms)
         toggle=NSButton(checkboxWithTitle:"백그라운드에서 왼쪽 Alt+Tab 사용",target:self,action:#selector(toggleHotkey));stack.addArrangedSubview(toggle)
         tileToggle=NSButton(checkboxWithTitle:"Command + 왼쪽 Alt 창 관리 단축키 (실험)",target:self,action:#selector(toggleTiling))
+        toggle.state=WindowFeaturePreference.switcher.enabled ? .on:.off
+        tileToggle.state=WindowFeaturePreference.windowManagement.enabled ? .on:.off
         stack.addArrangedSubview(tileToggle)
         let layoutHelp=NSTextField(wrappingLabelWithString:"← → ↑ ↓: 절반 배치 · Return: 최대화/복원 · M: 최소화\n동작키와 Command·Alt를 모두 놓으면 실행됩니다. 메뉴의 ‘창 배치’로도 사용할 수 있습니다.")
         layoutHelp.font = .systemFont(ofSize:11);layoutHelp.textColor = .secondaryLabelColor;stack.addArrangedSubview(layoutHelp)
@@ -107,11 +128,51 @@ import WindowBridgeCore
         hoverToggle.state=grid.hoverEnabled ? .on:.off;stack.addArrangedSubview(hoverToggle)
         message=NSTextField(wrappingLabelWithString:"상단 메뉴 막대에서 창 전환을 켜고 끌 수 있습니다.\n실제 창 썸네일은 화면 기록, 창 전환은 손쉬운 사용 권한이 필요합니다.")
         message.maximumNumberOfLines=3;message.font = .systemFont(ofSize:12);message.textColor = .secondaryLabelColor;stack.addArrangedSubview(message)
-        let note=NSTextField(wrappingLabelWithString:"키보드·마우스 탭의 변경은 적용 버튼으로 저장합니다.\n창 전환을 켤 때 BetterCmdTab이 실행 중이면 종료 여부를 확인합니다.")
+        let note=NSTextField(wrappingLabelWithString:"키보드·마우스 탭의 변경은 적용 버튼으로 저장합니다.\n창 전환과 창 관리 단축키는 켜면 즉시 적용되고 다음 실행에도 유지됩니다.")
         note.font = .systemFont(ofSize:11);note.textColor = .secondaryLabelColor;stack.addArrangedSubview(note)
     }
     func button(_ title:String,_ action:Selector)->NSButton { let b=NSButton(title:title,target:self,action:action);b.bezelStyle = .rounded;return b }
-    @objc func openSettings() { unifiedSettings?.refreshWhenOpened();settings.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true) }
+    @objc func openSettings() { unifiedSettings?.refreshWhenOpened();refreshLoginItemStatus();settings.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true) }
+    @objc func toggleLoginItem() {
+        do {
+            switch SMAppService.mainApp.status {
+            case .enabled, .requiresApproval: try SMAppService.mainApp.unregister()
+            default: try SMAppService.mainApp.register()
+            }
+            refreshLoginItemStatus()
+        } catch { refreshLoginItemStatus(error:error) }
+    }
+    @objc func openLoginItems() { SMAppService.openSystemSettingsLoginItems() }
+    func applicationDidBecomeActive(_ notification:Notification) { refreshLoginItemStatus() }
+    func refreshLoginItemStatus(error:Error?=nil) {
+        switch SMAppService.mainApp.status {
+        case .enabled:
+            loginToggle?.state = .on;loginStatus?.stringValue="로그인 항목 상태: 켜짐"
+        case .requiresApproval:
+            loginToggle?.state = .mixed;loginStatus?.stringValue="로그인 항목 상태: 시스템 설정에서 승인이 필요합니다."
+        case .notRegistered:
+            loginToggle?.state = .off;loginStatus?.stringValue="로그인 항목 상태: 꺼짐"
+        case .notFound:
+            loginToggle?.state = .off;loginStatus?.stringValue="로그인 항목 상태를 확인할 수 없습니다."
+        @unknown default:
+            loginToggle?.state = .off;loginStatus?.stringValue="로그인 항목 상태를 확인할 수 없습니다."
+        }
+        if let error {
+            loginStatus?.stringValue += "\n등록 작업 실패: \(error.localizedDescription)"
+            loginStatus?.toolTip=error.localizedDescription
+        }
+        else { loginStatus?.toolTip=loginStatus?.stringValue }
+    }
+    func restoreFeaturePreferences() {
+        var issues:[String]=[]
+        if tileToggle.state == .on,let issue=setTilingEnabled(true,interactive:false) { issues.append(issue) }
+        if toggle.state == .on,let issue=setSwitcherEnabled(true,interactive:false) { issues.append(issue) }
+        if !issues.isEmpty { showStatus(issues.joined(separator:"\n")) }
+        else if switchingActive || tilingActive { showStatus("저장한 창 전환 설정을 복원했습니다.") }
+    }
+    func showStatus(_ text:String) {
+        message?.stringValue=text;message?.toolTip=text;status?.button?.toolTip=text
+    }
     @objc func preview() { guard !refreshing else { return };dismiss();store.demo();isDemo=true;show(reverse:false) }
     @objc func screenPermission() {
         if !CGPreflightScreenCaptureAccess() { _=CGRequestScreenCaptureAccess() }
@@ -153,16 +214,36 @@ import WindowBridgeCore
     @objc func maximizeWindow() { menuWindowAction(.toggleMaximize) }
     @objc func restoreWindow() { menuWindowAction(.restore) }
     @objc func minimizeWindow() { menuWindowAction(.minimize) }
-    @objc func toggleTiling() {
+    @objc func toggleTiling() { _=setTilingEnabled(tileToggle.state == .on,interactive:true) }
+    func setTilingEnabled(_ enabled:Bool,interactive:Bool)->String? {
         hook.cancelWindowAction()
-        if tileToggle.state == .on && !AXIsProcessTrusted() {
-            tileToggle.state = .off;message.stringValue="창 배치에는 손쉬운 사용 권한이 필요합니다.";return
+        guard enabled else {
+            tilingActive=false
+            hook.configure(switching:switchingActive,tiling:false)
+            if !switchingActive { hook.stopIfUnused() }
+            if interactive { WindowFeaturePreference.windowManagement.persist(false,started:true,userInitiated:true) }
+            showStatus("창 관리 단축키를 껐습니다. 메뉴에서 창 배치는 사용할 수 있습니다.")
+            return nil
         }
-        hook.configure(switching:toggle.state == .on,tiling:tileToggle.state == .on)
-        if tileToggle.state == .on {
-            if !hook.start() { tileToggle.state = .off;hook.configure(switching:toggle.state == .on,tiling:false) }
-        } else if toggle.state == .off { hook.stopIfUnused() }
-        message.stringValue=tileToggle.state == .on ? "창 관리 단축키 켜짐 · 모든 키를 놓으면 실행합니다.":"창 관리 단축키를 껐습니다. 메뉴에서 창 배치는 사용할 수 있습니다."
+        guard AXIsProcessTrusted() else {
+            tilingActive=false;hook.configure(switching:switchingActive,tiling:false)
+            if !switchingActive { hook.stopIfUnused() }
+            let issue="창 관리 단축키를 시작하지 못했습니다. 손쉬운 사용 권한을 허용한 뒤 설정에서 다시 켜 주세요."
+            if interactive { tileToggle.state=WindowFeaturePreference.windowManagement.enabled ? .on:.off;showStatus(issue) }
+            return issue
+        }
+        hook.configure(switching:switchingActive,tiling:true)
+        guard hook.start() else {
+            tilingActive=false;hook.configure(switching:switchingActive,tiling:false)
+            if !switchingActive { hook.stopIfUnused() }
+            let issue="창 관리 단축키를 등록하지 못했습니다. 손쉬운 사용 권한을 확인하고 앱을 다시 실행해 주세요."
+            if interactive { tileToggle.state=WindowFeaturePreference.windowManagement.enabled ? .on:.off;showStatus(issue) }
+            return issue
+        }
+        tilingActive=true
+        if interactive { WindowFeaturePreference.windowManagement.persist(true,started:true,userInitiated:true) }
+        showStatus("창 관리 단축키 켜짐 · 모든 키를 놓으면 실행합니다.")
+        return nil
     }
     @objc func toggleHover() {
         grid.hoverEnabled=hoverToggle.state == .on
@@ -177,26 +258,63 @@ import WindowBridgeCore
         toggle.state = toggle.state == .on ? .off : .on
         toggleHotkey()
     }
-    @objc func toggleHotkey() {
-        guard toggle.state == .on else { hook.configure(switching:false,tiling:tileToggle.state == .on);if tileToggle.state == .off { hook.stopIfUnused() };timer?.invalidate();timer=nil;dismiss();message.stringValue="창 전환을 껐습니다. 상단 메뉴에서 다시 켤 수 있습니다.";return }
+    @objc func toggleHotkey() { _=setSwitcherEnabled(toggle.state == .on,interactive:true) }
+    func setSwitcherEnabled(_ enabled:Bool,interactive:Bool)->String? {
+        guard enabled else {
+            switchingActive=false
+            hook.configure(switching:false,tiling:tilingActive)
+            if !tilingActive { hook.stopIfUnused() }
+            timer?.invalidate();timer=nil;dismiss()
+            if interactive { WindowFeaturePreference.switcher.persist(false,started:true,userInitiated:true) }
+            showStatus("창 전환을 껐습니다. 상단 메뉴에서 다시 켤 수 있습니다.")
+            return nil
+        }
         guard AXIsProcessTrusted(),CGPreflightScreenCaptureAccess() else {
-            toggle.state = .off;message.stringValue="화면 기록과 손쉬운 사용 권한을 먼저 허용해 주세요.";return
+            switchingActive=false;hook.configure(switching:false,tiling:tilingActive)
+            if !tilingActive { hook.stopIfUnused() }
+            timer?.invalidate();timer=nil;dismiss()
+            let issue="창 전환을 시작하지 못했습니다. 화면 기록과 손쉬운 사용 권한을 허용한 뒤 설정에서 다시 켜 주세요."
+            if interactive { toggle.state=WindowFeaturePreference.switcher.enabled ? .on:.off;showStatus(issue) }
+            return issue
         }
         let competitors=NSRunningApplication.runningApplications(withBundleIdentifier:"pro.bettercmdtab.BetterCmdTab")
         if !competitors.isEmpty {
+            if !interactive {
+                switchingActive=false;hook.configure(switching:false,tiling:tilingActive)
+                if !tilingActive { hook.stopIfUnused() }
+                return "BetterCmdTab이 실행 중이어서 창 전환을 복원하지 않았습니다. 종료한 뒤 설정에서 창 전환을 껐다 켜세요."
+            }
             let alert=NSAlert();alert.messageText="BetterCmdTab을 종료하고 테스트할까요?";alert.informativeText="두 앱이 Alt+Tab을 동시에 처리하지 않도록 BetterCmdTab을 종료합니다. 설정과 자동 실행 항목은 유지됩니다."
             alert.addButton(withTitle:"종료하고 테스트");alert.addButton(withTitle:"취소")
-            guard alert.runModal() == .alertFirstButtonReturn else { toggle.state = .off;return }
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                switchingActive=false;hook.configure(switching:false,tiling:tilingActive)
+                if !tilingActive { hook.stopIfUnused() }
+                let issue="BetterCmdTab이 실행 중이어서 창 전환을 켜지 않았습니다."
+                toggle.state=WindowFeaturePreference.switcher.enabled ? .on:.off
+                showStatus(issue)
+                return issue
+            }
             competitors.forEach { _=$0.terminate() }
         }
-        hook.configure(switching:true,tiling:tileToggle.state == .on)
-        guard hook.start() else {toggle.state = .off;message.stringValue="단축키를 등록하지 못했습니다. 손쉬운 사용 권한을 확인하고 앱을 다시 실행해 주세요.";return}
+        hook.configure(switching:true,tiling:tilingActive)
+        guard hook.start() else {
+            switchingActive=false;hook.configure(switching:false,tiling:tilingActive)
+            if !tilingActive { hook.stopIfUnused() }
+            timer?.invalidate();timer=nil
+            let issue="단축키를 등록하지 못했습니다. 손쉬운 사용 권한을 확인하고 앱을 다시 실행해 주세요."
+            if interactive { toggle.state=WindowFeaturePreference.switcher.enabled ? .on:.off;showStatus(issue) }
+            return issue
+        }
+        switchingActive=true
+        if interactive { WindowFeaturePreference.switcher.persist(true,started:true,userInitiated:true) }
         isDemo=false;store.windows=[]
-        message.stringValue="백그라운드 전환 켜짐 · 설정 창을 닫아도 작동합니다.\n왼쪽 Alt+Tab / Shift+Tab / Esc\n로그인 시 자동 실행은 아직 설정하지 않았습니다."
+        showStatus("백그라운드 전환 켜짐 · 설정 창을 닫아도 작동합니다.\n왼쪽 Alt+Tab / Shift+Tab / Esc")
         Task { @MainActor in try? await store.refresh() }
+        timer?.invalidate()
         timer=Timer.scheduledTimer(withTimeInterval:2,repeats:true) { [weak self] _ in
             Task { @MainActor in guard let self,!self.presenting else{return};try? await self.store.refresh() }
         }
+        return nil
     }
     func hotTab(_ session:Int,_ reverse:Bool) {
         hook.cancelWindowAction()
